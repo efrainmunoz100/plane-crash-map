@@ -1,0 +1,199 @@
+<html>
+
+<head>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="https://d3js.org/topojson.v3.min.js"></script>
+  <style>
+    .state {
+      fill: none;
+    }
+
+    .outline {
+      fill: none;
+      stroke: white;
+      stroke-width: 1px;
+    }
+
+    body {
+      font-family: 'Lato', sans-serif;
+      font-size: 15px;
+      text-align: center;
+      color: white;
+      background-color: #0e1016;
+    }
+
+    h1 {
+      padding-top: 24px;
+      text-align: center;
+      font-size: 36px;
+      color: rgb(104, 21, 21);
+    }
+
+    h2 {
+      padding-top: 0px;
+      padding-bottom: 16px;
+      text-align: center;
+      font-size: 16px;
+      color: #c6eddb;
+    }
+  </style>
+
+<body>
+  <h1>INFO 3300 Project 2</h1>
+  <h2>By: Efrain Munoz, Kyle Ruhl, John Aclufi, Annika Bissinger </h2>
+
+  <svg id="usa" height="600" width="800" style="margin:20px"> </svg>
+
+  <p id="main-visualization">
+    <script>
+      async function buildMap() {
+
+        // Setup map area
+        const svg = d3.select("#usa");
+        const width = svg.attr("width");
+        const height = svg.attr("height");
+        const margin = { top: 20, right: 20, bottom: 20, left: 20 };
+        const mapWidth = width - margin.left - margin.right;
+        const mapHeight = height - margin.top - margin.bottom;
+        const map = svg.append("g")
+          .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+        // Dataset provided from class - Mike Bostock:
+        //   "../datasets/us-smaller.json"
+        const USA = await d3.json("./Data/us_smaller.json");
+        var states = topojson.feature(USA, USA.objects.states);
+        var statesMesh = topojson.mesh(USA, USA.objects.states);
+        var projection = d3.geoAlbersUsa().fitSize([mapWidth, mapHeight], states);
+        var path = d3.geoPath().projection(projection);
+
+        // Draw the state paths
+        let statePaths = map.selectAll("path.state").data(states.features)
+          .join("path")
+          .attr("class", "state")
+          .attr("d", path)
+          .attr("style", "pointer-events:all")
+          .on("mouseover", mouseEnter)
+          .on("mouseout", mouseExit);
+
+        map.append("path").datum(statesMesh)
+          .attr("class", "outline")
+          .attr("d", path);
+
+        // Load accidents data-set
+        let accidents = await d3.csv("./Data/FatalUSAccidents.csv")
+        let filtered_accidents = []
+        accidents.forEach(accident => {
+          // Convert accident latitude & longitude to position on map
+          accident.location = projection([accident.Longitude, accident.Latitude]);
+          if (accident.location != null) {
+            filtered_accidents.push(accident);
+          }
+        });
+
+        // Plot accident circles
+        map.selectAll("circle")
+          .data(filtered_accidents)
+          .join('circle')
+          .attr('cx', d => d.location[0])
+          .attr('cy', d => d.location[1])
+          .attr('r', '2px')
+          .attr('fill', "red")
+          .attr('opacity', .5)
+          .attr("pointer-events", "none")
+
+        // prepare the mesh for when the user mouses over
+        let momesh =  map.append("path")
+          .attr("class","mouseover outline")
+          .style("stroke", "white")
+          .style("stroke-width", 3)
+          .attr("d", "");
+
+        // make a template for information boxes
+        let infoboxWidth = 240
+        let infoboxHeight = 100
+        let infobox = map.append("g")
+          .attr("class", "infobox")
+          .attr("visibility", "hidden")
+        infobox.append("rect")
+          .attr("fill", "#333333")
+          .attr("opacity", 0.9)
+          .attr("x", -infoboxWidth / 2)
+          .attr("y", 0)
+          .attr("width", infoboxWidth)
+          .attr("height", infoboxHeight)
+        let stateNameTxt = infobox.append("text")
+          .attr("fill", "white")
+          .attr("font-weight", "bold")
+          .attr("text-anchor", "middle")
+          .attr("alignment-baseline", "hanging")
+          .attr("x", 0)
+          .attr("y", 2)
+        let textPlaceholderGenerator = (x, y) => {
+          return infobox.append("text")
+            .attr("fill", "white")
+            .attr("text-anchor", "middle")
+            .attr("alignment-baseline", "hanging")
+            .attr("x", x)
+            .attr("y", y)
+        }
+        let numOfAccidentsTxt = textPlaceholderGenerator(0,22)
+        let sumOfFatalitiesTxt = textPlaceholderGenerator(0,42)
+        let numOfAccidentsRankTxt = textPlaceholderGenerator(0,62)
+        let fatalitiesPer10kTxt = textPlaceholderGenerator(0, 82)
+
+        // load accidents per state dataset
+        let rawByStateData = await d3.csv("./Data/ByStateData.csv")
+        let byStateData = rawByStateData.reduce((acc, d) => {
+          acc[d.FIPS_Code] = d;
+          return acc
+        }, {})
+
+        // function to find the optimal x and y positions for the information text box
+        function optXAndY(x, y) {
+          halfOfWidth = infoboxWidth / 2
+          if (x < halfOfWidth) {
+            x = halfOfWidth
+          }
+          else if (x + halfOfWidth > mapWidth) {
+            x = mapWidth - halfOfWidth
+          }
+          if (y < 0) {
+            y = 0
+          }
+          else if (y + infoboxHeight > mapHeight) {
+            y = mapHeight - infoboxHeight
+          }
+          return [x, y]
+        }
+
+        // generate mouseover box
+        function mouseEnter() {
+          console.log(byStateData)
+          infobox.style("visibility", "visible")
+          let state = d3.select(this)
+          let stateID = state.datum().id
+          stateNameTxt.text(byStateData[stateID]["State_Abbr"])
+          numOfAccidentsTxt.text(`# of Accidents: ${byStateData[stateID]["Number_Of_Fatal_Accidents"]}`)
+          sumOfFatalitiesTxt.text(`Total Deaths: ${byStateData[stateID]["Sum_Of_Fatalities"]}`)
+          numOfAccidentsRankTxt.text(`Rank: ${byStateData[stateID]["Num_Accidents_State_Rank"]}`)
+          fatalitiesPer10kTxt.text(`Deaths per 10k Pop: ${byStateData[stateID]["Fatalities_Per_10000_Pop"]}`)
+
+          let bounds = path.bounds(state.datum())
+          let [xPos, yPos] = optXAndY((bounds[0][0]+bounds[1][0]) / 2.0, bounds[1][1] - 15)
+          infobox.attr("transform", `translate(${xPos}, ${yPos})`)
+
+          var mo = topojson.mesh(USA, USA.objects.states, function(a, b) { return a.id === stateID || b.id === stateID; })
+          momesh.datum(mo).attr("d", path)
+        }
+
+        function mouseExit() {
+          infobox.style("visibility", "hidden")
+          momesh.attr("d", "")
+        }
+      }
+
+      buildMap();
+    </script>
+  </p>
+</body>
+</head>
